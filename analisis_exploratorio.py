@@ -27,8 +27,42 @@ import seaborn as sns
 from scipy import stats
 from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
 from scipy.spatial.distance import pdist
+from sklearn.cluster import KMeans, AgglomerativeClustering
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import adjusted_rand_score
+from kneed import KneeLocator
 import warnings
+import os
+from pathlib import Path
+
 warnings.filterwarnings('ignore')
+
+# Verificar disponibilidad de librerías opcionales
+KNEED_AVAILABLE = True  # kneed ya está instalado
+
+# ============================================================
+# CONFIGURACIÓN DE CARPETAS PARA OUTPUTS
+# ============================================================
+
+def crear_estructura_carpetas():
+    """
+    Crea la estructura de carpetas para organizar todos los outputs
+    """
+    carpetas = [
+        'outputs',
+        'outputs/graficos',
+        'outputs/graficos/analisis',
+        'outputs/graficos/preguntas',
+        'outputs/graficos/clustering',
+        'outputs/datos'
+    ]
+    
+    for carpeta in carpetas:
+        Path(carpeta).mkdir(parents=True, exist_ok=True)
+    
+    print("✓ Estructura de carpetas creada:")
+    for carpeta in carpetas:
+        print(f"  - {carpeta}/")
 
 # NORMALIZACIÓN DE HORA
 def normalizar_hora(row):
@@ -250,7 +284,7 @@ def cruces_variables(df):
 
     # Cruce 5: Área geográfica vs Delito
     print("\n" + "─" * 70)
-    print("🔀 CRUCE 5: Área Geográfica vs Delito")
+    print("CRUCE 5: Área Geográfica vs Delito")
     print("─" * 70)
     if "area" in df.columns:
         cross5 = pd.crosstab(df["area"], df["delito"], margins=True)
@@ -368,8 +402,8 @@ def graficar_normalidad(df):
         ax3.grid(alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig('analisis_normalidad.png', dpi=300, bbox_inches='tight')
-    print("✓ Gráfico guardado: analisis_normalidad.png")
+    plt.savefig('outputs/graficos/analisis/normalidad.png', dpi=300, bbox_inches='tight')
+    print("✓ Gráfico guardado: outputs/graficos/analisis/normalidad.png")
     plt.show()
 
 def detectar_outliers(df):
@@ -514,8 +548,8 @@ def pregunta_1_patrones_temporales(df):
     axes[1, 1].tick_params(axis='x', rotation=45)
     
     plt.tight_layout()
-    plt.savefig('pregunta1_patrones_temporales.png', dpi=300, bbox_inches='tight')
-    print("\n✓ Gráfico guardado: pregunta1_patrones_temporales.png")
+    plt.savefig('outputs/graficos/preguntas/pregunta1_patrones_temporales.png', dpi=300, bbox_inches='tight')
+    print("\n✓ Gráfico guardado: outputs/graficos/preguntas/pregunta1_patrones_temporales.png")
     plt.show()
     
     # Conclusión
@@ -643,8 +677,8 @@ def graficos_exploratorios(df):
         ax9.axis('off')
     
     plt.suptitle('Dashboard Exploratorio Completo', fontsize=18, fontweight='bold', y=0.995)
-    plt.savefig('graficos_exploratorios.png', dpi=300, bbox_inches='tight')
-    print("\n✓ Gráfico guardado: graficos_exploratorios.png")
+    plt.savefig('outputs/graficos/analisis/exploratorios.png', dpi=300, bbox_inches='tight')
+    print("\n✓ Gráfico guardado: outputs/graficos/analisis/exploratorios.png")
     plt.show()
 
 # ============================================================
@@ -654,189 +688,365 @@ def graficos_exploratorios(df):
 def realizar_clustering(df):
     """
     f. Agrupamiento (clustering) e interpretación de resultados
-    Usamos clustering jerárquico (sin sklearn)
+    Usa K-Means como método principal y clustering jerárquico como complemento
+    Sigue las mejores prácticas de los ejemplos de clustering
     """
     print("\n" + "=" * 70)
     print("PARTE F: CLUSTERING E INTERPRETACIÓN")
     print("=" * 70)
     
-    print("\n🔧 Preparando datos para clustering...")
+    print("\nPreparando datos para clustering...")
     
     # Seleccionar y preparar variables para clustering
-    # Convertir categóricas a numéricas con get_dummies
     df_cluster = df[["edad", "sexo", "hora_categoria", "delito"]].copy()
     df_cluster = df_cluster.dropna()
     
     print(f"Registros válidos para clustering: {len(df_cluster):,}")
     
-    # Si hay demasiados datos, tomar muestra
-    if len(df_cluster) > 5000:
-        df_cluster = df_cluster.sample(n=5000, random_state=42)
-        print(f"Se tomó una muestra de 5,000 registros para eficiencia computacional")
+    # Tomar muestra más grande para mejor análisis
+    if len(df_cluster) > 10000:
+        df_cluster = df_cluster.sample(n=10000, random_state=42)
+        print(f"Se tomó una muestra de 10,000 registros para eficiencia computacional")
     
-    # Codificar variables categóricas
+    # Codificar variables categóricas (como en los ejemplos)
+    print("\nCodificando variables categóricas...")
     df_encoded = pd.get_dummies(df_cluster, columns=["sexo", "hora_categoria", "delito"], drop_first=True)
     
-    # Normalizar variables numéricas manualmente (solo las que son realmente numéricas)
-    numeric_cols = df_encoded.select_dtypes(include=[np.number]).columns
-    for col in numeric_cols:
-        min_val = df_encoded[col].min()
-        max_val = df_encoded[col].max()
-        if max_val > min_val:  # Evitar división por cero
-            df_encoded[col] = (df_encoded[col] - min_val) / (max_val - min_val)
-    
     print(f"Variables en el modelo: {df_encoded.shape[1]}")
-    print(f"Variables: {list(df_encoded.columns)[:10]}...")  # Mostrar primeras 10
+    print(f"Primeras variables: {list(df_encoded.columns)[:10]}...")
     
-    # Realizar clustering jerárquico
-    print("\nRealizando clustering jerárquico...")
+    # ============================================================
+    # ESTANDARIZACIÓN CON STANDARDSCALER (Como en los ejemplos)
+    # ============================================================
+    print("\nEstandarizando datos con StandardScaler...")
+    escalador = StandardScaler()
+    datos_escalados = escalador.fit_transform(df_encoded)
     
-    # Matriz de distancias (usar una muestra si es muy grande)
-    sample_size = min(1000, len(df_encoded))
-    df_sample = df_encoded.sample(n=sample_size, random_state=42)
-    
-    linkage_matrix = linkage(df_sample, method='ward')
-    
-    # Determinar número óptimo de clusters (método del codo)
-    print("\nDeterminando número óptimo de clusters...")
-    
-    last = linkage_matrix[-10:, 2]
-    last_rev = last[::-1]
-    idxs = np.arange(1, len(last) + 1)
-    
-    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
-    
-    # Dendrograma
-    dendrogram(linkage_matrix, ax=axes[0], truncate_mode='lastp', p=30)
-    axes[0].set_title('Dendrograma - Clustering Jerárquico', fontweight='bold', fontsize=14)
-    axes[0].set_xlabel('Índice de Muestra o (Tamaño de Cluster)')
-    axes[0].set_ylabel('Distancia')
-    axes[0].axhline(y=10, color='red', linestyle='--', label='Corte sugerido')
-    axes[0].legend()
-    
-    # Método del codo
-    acceleration = np.diff(last, 2)
-    k = acceleration.argmax() + 2
-    
-    axes[1].plot(idxs, last_rev, marker='o')
-    axes[1].axvline(x=k, color='red', linestyle='--', label=f'Clusters óptimos: {k}')
-    axes[1].set_xlabel('Número de Clusters')
-    axes[1].set_ylabel('Distancia')
-    axes[1].set_title('Método del Codo', fontweight='bold', fontsize=14)
-    axes[1].legend()
-    axes[1].grid(alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig('clustering_dendrograma.png', dpi=300, bbox_inches='tight')
-    print("✓ Dendrograma guardado: clustering_dendrograma.png")
-    plt.show()
-    
-    # Asignar clusters
-    n_clusters = min(k, 5)  # Limitar a máximo 5 clusters
-    print(f"\nCreando {n_clusters} clusters...")
-    
-    clusters = fcluster(linkage_matrix, n_clusters, criterion='maxclust')
-    df_sample['Cluster'] = clusters
-    
-    # Análisis de clusters
+    # ============================================================
+    # MÉTODO 1: K-MEANS CLUSTERING (MÉTODO PRINCIPAL)
+    # ============================================================
     print("\n" + "=" * 70)
-    print("INTERPRETACIÓN DE CLUSTERS")
+    print("MÉTODO 1: K-MEANS CLUSTERING")
     print("=" * 70)
     
-    # Recuperar datos originales para los índices del sample
-    df_cluster_original = df_cluster.loc[df_sample.index].copy()
-    df_cluster_original['Cluster'] = clusters
+    # Configuración de KMeans (como en los ejemplos)
+    kmeans_kwargs = {
+        "init": "k-means++",  # Mejor convergencia que "random"
+        "n_init": 10,
+        "max_iter": 300,
+        "random_state": 42,
+    }
+    
+    # Calcular WCSS para diferentes valores de K (Método del Codo)
+    print("\nCalculando WCSS para método del codo...")
+    wcss = []
+    K_range = range(1, 11)
+    
+    for k in K_range:
+        kmeans = KMeans(n_clusters=k, **kmeans_kwargs)
+        kmeans.fit(datos_escalados)
+        wcss.append(kmeans.inertia_)
+    
+    print(f"WCSS calculados: {[f'{w:.2f}' for w in wcss[:5]]}...")
+    
+    # Determinar K óptimo con KneeLocator
+    print("\nUsando KneeLocator para detectar K óptimo...")
+    try:
+        localizador_codo = KneeLocator(
+            range(1, 11), 
+            wcss, 
+            curve="convex", 
+            direction="decreasing"
+        )
+        k_optimo = localizador_codo.elbow
+        if k_optimo is None:
+            # Fallback si KneeLocator no encuentra un codo claro
+            diferencias = np.diff(wcss)
+            k_optimo = np.argmax(np.abs(np.diff(diferencias))) + 2
+            print(f"✓ K óptimo estimado con método alternativo: {k_optimo}")
+        else:
+            print(f"✓ K óptimo detectado automáticamente: {k_optimo}")
+    except Exception as e:
+        # Método manual como fallback
+        diferencias = np.diff(wcss)
+        k_optimo = np.argmax(np.abs(np.diff(diferencias))) + 2
+        print(f"✓ K óptimo estimado manualmente: {k_optimo}")
+    
+    # Graficar método del codo
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # Gráfico 1: WCSS vs K
+    axes[0].plot(K_range, wcss, marker='o', linewidth=2, markersize=8)
+    axes[0].axvline(x=k_optimo, color='red', linestyle='--', linewidth=2, 
+                    label=f'K óptimo = {k_optimo}')
+    axes[0].set_xlabel('Número de Clusters (K)', fontsize=12)
+    axes[0].set_ylabel('WCSS (Within-Cluster Sum of Squares)', fontsize=12)
+    axes[0].set_title('Método del Codo - Selección de K Óptimo', fontweight='bold', fontsize=14)
+    axes[0].legend(fontsize=11)
+    axes[0].grid(alpha=0.3)
+    
+    # Realizar K-Means con K óptimo
+    print(f"\nEjecutando K-Means con K={k_optimo}...")
+    kmeans_final = KMeans(n_clusters=k_optimo, **kmeans_kwargs)
+    clusters_kmeans = kmeans_final.fit_predict(datos_escalados)
+    
+    # Añadir clusters al dataframe
+    df_cluster['Cluster_KMeans'] = clusters_kmeans
+    
+    print(f"✓ K-Means completado")
+    print(f"  - Inertia final: {kmeans_final.inertia_:.2f}")
+    print(f"  - Iteraciones: {kmeans_final.n_iter_}")
+    
+    # ============================================================
+    # MÉTODO 2: CLUSTERING JERÁRQUICO (COMPLEMENTARIO)
+    # ============================================================
+    print("\n" + "=" * 70)
+    print("MÉTODO 2: CLUSTERING JERÁRQUICO")
+    print("=" * 70)
+    
+    # Usar muestra más pequeña para jerárquico (es más costoso)
+    sample_size = min(2000, len(datos_escalados))
+    indices_sample = np.random.choice(len(datos_escalados), sample_size, replace=False)
+    datos_sample = datos_escalados[indices_sample]
+    
+    print(f"\nCalculando linkage con método Ward (muestra de {sample_size} registros)...")
+    linkage_matrix = linkage(datos_sample, method='ward')
+    
+    # Dendrograma
+    dendrogram(linkage_matrix, ax=axes[1], truncate_mode='lastp', p=30, 
+               color_threshold=None)
+    axes[1].set_title('Dendrograma - Clustering Jerárquico', fontweight='bold', fontsize=14)
+    axes[1].set_xlabel('Índice de Muestra o (Tamaño de Cluster)', fontsize=12)
+    axes[1].set_ylabel('Distancia Euclidiana', fontsize=12)
+    axes[1].axhline(y=np.percentile(linkage_matrix[:, 2], 90), color='red', 
+                    linestyle='--', label='Corte sugerido')
+    axes[1].legend(fontsize=11)
+    
+    plt.tight_layout()
+    plt.savefig('outputs/graficos/clustering/metodo_codo_dendrograma.png', dpi=300, bbox_inches='tight')
+    print("✓ Gráficos guardados: outputs/graficos/clustering/metodo_codo_dendrograma.png")
+    plt.show()
+    
+    # Aplicar clustering jerárquico
+    print(f"\nAplicando AgglomerativeClustering con K={k_optimo}...")
+    clust_jerarq = AgglomerativeClustering(n_clusters=k_optimo, 
+                                           metric='euclidean', 
+                                           linkage='ward')
+    clusters_jerarquico = clust_jerarq.fit_predict(datos_escalados)
+    df_cluster['Cluster_Jerarquico'] = clusters_jerarquico
+    
+    # ============================================================
+    # ANÁLISIS E INTERPRETACIÓN DE CLUSTERS (K-MEANS)
+    # ============================================================
+    print("\n" + "=" * 70)
+    print("INTERPRETACIÓN DE CLUSTERS (K-MEANS)")
+    print("=" * 70)
     
     print(f"\nDistribución de registros por cluster:")
-    print(df_cluster_original['Cluster'].value_counts().sort_index())
+    cluster_counts = df_cluster['Cluster_KMeans'].value_counts().sort_index()
+    print(cluster_counts)
+    print(f"\nPorcentajes:")
+    print((cluster_counts / len(df_cluster) * 100).round(2))
     
-    # Caracterizar cada cluster
-    for cluster_id in sorted(df_cluster_original['Cluster'].unique()):
+    # Caracterizar cada cluster con estadísticas detalladas
+    for cluster_id in sorted(df_cluster['Cluster_KMeans'].unique()):
         print(f"\n{'─' * 70}")
         print(f"CLUSTER {cluster_id}")
         print('─' * 70)
         
-        cluster_data = df_cluster_original[df_cluster_original['Cluster'] == cluster_id]
+        cluster_data = df_cluster[df_cluster['Cluster_KMeans'] == cluster_id]
         
-        print(f"Tamaño: {len(cluster_data)} registros ({len(cluster_data)/len(df_cluster_original)*100:.1f}%)")
+        print(f"Tamaño: {len(cluster_data):,} registros ({len(cluster_data)/len(df_cluster)*100:.1f}%)")
         
         print(f"\nEdad:")
         print(f"  Media: {cluster_data['edad'].mean():.1f} años")
         print(f"  Mediana: {cluster_data['edad'].median():.1f} años")
+        print(f"  Rango: {cluster_data['edad'].min():.0f} - {cluster_data['edad'].max():.0f} años")
         
         print(f"\nSexo predominante:")
-        print(cluster_data['sexo'].value_counts().head(2))
+        sexo_dist = cluster_data['sexo'].value_counts()
+        for sexo, count in sexo_dist.items():
+            print(f"  {sexo}: {count} ({count/len(cluster_data)*100:.1f}%)")
         
-        print(f"\nDelito más común:")
-        print(cluster_data['delito'].value_counts().head(3))
+        print(f"\nTop 3 Delitos:")
+        top_delitos = cluster_data['delito'].value_counts().head(3)
+        for delito, count in top_delitos.items():
+            print(f"  {delito}: {count} ({count/len(cluster_data)*100:.1f}%)")
         
         print(f"\nHora más frecuente:")
-        print(cluster_data['hora_categoria'].value_counts().head(3))
+        hora_dist = cluster_data['hora_categoria'].value_counts().head(3)
+        for hora, count in hora_dist.items():
+            print(f"  {hora}: {count} ({count/len(cluster_data)*100:.1f}%)")
     
-    # Visualización de clusters
-    print("\nGenerando visualización de clusters...")
+    # ============================================================
+    # VISUALIZACIONES DE CLUSTERS
+    # ============================================================
+    print("\nGenerando visualizaciones de clusters...")
     
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    fig.suptitle(f'Caracterización de {n_clusters} Clusters', fontsize=16, fontweight='bold')
+    fig, axes = plt.subplots(2, 2, figsize=(18, 14))
+    fig.suptitle(f'Caracterización de {k_optimo} Clusters (K-Means)', 
+                 fontsize=16, fontweight='bold')
     
-    # Gráfico 1: Edad por cluster
-    cluster_groups = [df_cluster_original[df_cluster_original['Cluster']==i]['edad'].values 
-                     for i in sorted(df_cluster_original['Cluster'].unique())]
-    axes[0, 0].boxplot(cluster_groups, labels=[f'C{i}' for i in sorted(df_cluster_original['Cluster'].unique())])
-    axes[0, 0].set_xlabel('Cluster')
-    axes[0, 0].set_ylabel('Edad')
-    axes[0, 0].set_title('Distribución de Edad por Cluster')
+    # Gráfico 1: Edad por cluster (Boxplot)
+    cluster_groups = [df_cluster[df_cluster['Cluster_KMeans']==i]['edad'].values 
+                     for i in sorted(df_cluster['Cluster_KMeans'].unique())]
+    bp = axes[0, 0].boxplot(cluster_groups, 
+                             labels=[f'Cluster {i}' for i in sorted(df_cluster['Cluster_KMeans'].unique())],
+                             patch_artist=True)
+    
+    # Colorear cada box
+    colors = plt.cm.Set3(np.linspace(0, 1, len(cluster_groups)))
+    for patch, color in zip(bp['boxes'], colors):
+        patch.set_facecolor(color)
+    
+    axes[0, 0].set_xlabel('Cluster', fontsize=11, fontweight='bold')
+    axes[0, 0].set_ylabel('Edad (años)', fontsize=11, fontweight='bold')
+    axes[0, 0].set_title('Distribución de Edad por Cluster', fontsize=12, fontweight='bold')
     axes[0, 0].grid(axis='y', alpha=0.3)
     
-    # Gráfico 2: Sexo por cluster
-    cruce_cluster_sexo = pd.crosstab(df_cluster_original['Cluster'], df_cluster_original['sexo'], normalize='index') * 100
-    cruce_cluster_sexo.plot(kind='bar', ax=axes[0, 1], stacked=True, color=['#FF69B4', '#4169E1'])
-    axes[0, 1].set_xlabel('Cluster')
-    axes[0, 1].set_ylabel('Porcentaje')
-    axes[0, 1].set_title('Distribución de Sexo por Cluster (%)')
-    axes[0, 1].legend(title='Sexo')
-    axes[0, 1].set_xticklabels([f'C{i}' for i in sorted(df_cluster_original['Cluster'].unique())], rotation=0)
+    # Gráfico 2: Sexo por cluster (Barras apiladas)
+    cruce_cluster_sexo = pd.crosstab(df_cluster['Cluster_KMeans'], 
+                                      df_cluster['sexo'], 
+                                      normalize='index') * 100
+    cruce_cluster_sexo.plot(kind='bar', ax=axes[0, 1], stacked=True, 
+                            color=['#FF69B4', '#4169E1'], width=0.7)
+    axes[0, 1].set_xlabel('Cluster', fontsize=11, fontweight='bold')
+    axes[0, 1].set_ylabel('Porcentaje (%)', fontsize=11, fontweight='bold')
+    axes[0, 1].set_title('Distribución de Sexo por Cluster', fontsize=12, fontweight='bold')
+    axes[0, 1].legend(title='Sexo', title_fontsize=10)
+    axes[0, 1].set_xticklabels([f'C{i}' for i in sorted(df_cluster['Cluster_KMeans'].unique())], 
+                               rotation=0)
+    axes[0, 1].grid(axis='y', alpha=0.3)
     
-    # Gráfico 3: Hora por cluster
-    cruce_cluster_hora = pd.crosstab(df_cluster_original['Cluster'], df_cluster_original['hora_categoria'])
-    sns.heatmap(cruce_cluster_hora, annot=True, fmt='d', cmap='YlOrRd', ax=axes[1, 0])
-    axes[1, 0].set_xlabel('Hora del Día')
-    axes[1, 0].set_ylabel('Cluster')
-    axes[1, 0].set_title('Heatmap: Cluster vs Hora')
+    # Gráfico 3: Heatmap Cluster vs Hora
+    cruce_cluster_hora = pd.crosstab(df_cluster['Cluster_KMeans'], 
+                                      df_cluster['hora_categoria'])
+    sns.heatmap(cruce_cluster_hora, annot=True, fmt='d', cmap='YlOrRd', 
+                ax=axes[1, 0], cbar_kws={'label': 'Frecuencia'})
+    axes[1, 0].set_xlabel('Hora del Día', fontsize=11, fontweight='bold')
+    axes[1, 0].set_ylabel('Cluster', fontsize=11, fontweight='bold')
+    axes[1, 0].set_title('Heatmap: Cluster vs Hora de Ocurrencia', fontsize=12, fontweight='bold')
+    axes[1, 0].set_yticklabels([f'C{i}' for i in sorted(df_cluster['Cluster_KMeans'].unique())], 
+                               rotation=0)
     
-    # Gráfico 4: Tamaño de clusters
-    cluster_sizes = df_cluster_original['Cluster'].value_counts().sort_index()
+    # Gráfico 4: Tamaño de clusters (Barras con etiquetas)
+    cluster_sizes = df_cluster['Cluster_KMeans'].value_counts().sort_index()
     colors_clusters = plt.cm.Set3(np.linspace(0, 1, len(cluster_sizes)))
-    axes[1, 1].bar(cluster_sizes.index, cluster_sizes.values, color=colors_clusters)
-    axes[1, 1].set_xlabel('Cluster')
-    axes[1, 1].set_ylabel('Cantidad de Registros')
-    axes[1, 1].set_title('Tamaño de Cada Cluster')
+    bars = axes[1, 1].bar(cluster_sizes.index, cluster_sizes.values, 
+                          color=colors_clusters, edgecolor='black', linewidth=1.5)
+    axes[1, 1].set_xlabel('Cluster', fontsize=11, fontweight='bold')
+    axes[1, 1].set_ylabel('Cantidad de Registros', fontsize=11, fontweight='bold')
+    axes[1, 1].set_title('Tamaño de Cada Cluster', fontsize=12, fontweight='bold')
     axes[1, 1].set_xticks(cluster_sizes.index)
     axes[1, 1].set_xticklabels([f'C{i}' for i in cluster_sizes.index])
     axes[1, 1].grid(axis='y', alpha=0.3)
     
-    for i, v in enumerate(cluster_sizes.values):
-        axes[1, 1].text(cluster_sizes.index[i], v, f'{v}\n({v/cluster_sizes.sum()*100:.1f}%)', 
-                       ha='center', va='bottom')
+    # Añadir etiquetas con valores y porcentajes
+    for i, (idx, v) in enumerate(cluster_sizes.items()):
+        axes[1, 1].text(idx, v + max(cluster_sizes.values)*0.02, 
+                       f'{v:,}\n({v/cluster_sizes.sum()*100:.1f}%)', 
+                       ha='center', va='bottom', fontsize=10, fontweight='bold')
     
     plt.tight_layout()
-    plt.savefig('clustering_caracterizacion.png', dpi=300, bbox_inches='tight')
-    print("✓ Visualización guardada: clustering_caracterizacion.png")
+    plt.savefig('outputs/graficos/clustering/caracterizacion.png', dpi=300, bbox_inches='tight')
+    print("✓ Visualización guardada: outputs/graficos/clustering/caracterizacion.png")
     plt.show()
     
+    # ============================================================
+    # HEATMAP CON CLUSTERMAP (Dendrograma + Heatmap integrado)
+    # ============================================================
+    print("\n Generando Clustermap (Dendrograma + Heatmap)...")
+    
+    # Crear matriz de agregación para clustermap
+    # Promedios de variables numéricas por cluster
+    cluster_profile = df_cluster.groupby('Cluster_KMeans').agg({
+        'edad': 'mean'
+    })
+    
+    # Agregar proporciones de variables categóricas
+    for col in ['sexo', 'hora_categoria', 'delito']:
+        prop_table = pd.crosstab(df_cluster['Cluster_KMeans'], 
+                                 df_cluster[col], 
+                                 normalize='index')
+        # Tomar solo las categorías más importantes para no saturar
+        top_cats = df_cluster[col].value_counts().head(5).index
+        for cat in top_cats:
+            if cat in prop_table.columns:
+                cluster_profile[f'{col}_{cat}'] = prop_table[cat]
+    
+    # Normalizar para mejor visualización
+    cluster_profile_norm = (cluster_profile - cluster_profile.mean()) / cluster_profile.std()
+    
+    # Crear clustermap
+    plt.figure(figsize=(14, 8))
+    g = sns.clustermap(cluster_profile_norm.T, 
+                      cmap='RdYlBu_r', 
+                      figsize=(12, 10),
+                      dendrogram_ratio=0.15,
+                      cbar_pos=(0.02, 0.8, 0.03, 0.18),
+                      linewidths=0.5,
+                      yticklabels=True,
+                      xticklabels=[f'Cluster {i}' for i in cluster_profile.index])
+    
+    g.fig.suptitle('Clustermap: Perfil de Clusters con Dendrograma', 
+                   fontsize=14, fontweight='bold', y=0.98)
+    plt.savefig('outputs/graficos/clustering/clustermap.png', dpi=300, bbox_inches='tight')
+    print("✓ Clustermap guardado: outputs/graficos/clustering/clustermap.png")
+    plt.show()
+    
+    # ============================================================
+    # COMPARACIÓN ENTRE MÉTODOS
+    # ============================================================
     print("\n" + "=" * 70)
-    print("RESUMEN DEL CLUSTERING:")
+    print("COMPARACIÓN: K-MEANS vs CLUSTERING JERÁRQUICO")
     print("=" * 70)
-    print(f"✓ Se identificaron {n_clusters} grupos distintos de víctimas")
-    print(f"✓ Los clusters se diferencian principalmente por:")
-    print(f"  - Edad de las víctimas")
-    print(f"  - Sexo predominante")
-    print(f"  - Tipo de delito")
-    print(f"  - Hora de ocurrencia")
-    print(f"\nEstos clusters pueden ayudar a:")
-    print(f"  - Identificar perfiles de víctimas")
-    print(f"  - Diseñar estrategias de prevención específicas")
-    print(f"  - Asignar recursos de seguridad de manera eficiente")
+    
+    # Calcular concordancia entre métodos
+    ari = adjusted_rand_score(df_cluster['Cluster_KMeans'], 
+                              df_cluster['Cluster_Jerarquico'])
+    print(f"\n✓ Adjusted Rand Index (ARI): {ari:.3f}")
+    print(f"  (Mide la similitud entre ambos métodos: 1.0 = idénticos, 0.0 = aleatorio)")
+    
+    if ari > 0.5:
+        print(f"  ➜ Ambos métodos producen agrupamientos MUY SIMILARES")
+    elif ari > 0.3:
+        print(f"  ➜ Ambos métodos producen agrupamientos MODERADAMENTE SIMILARES")
+    else:
+        print(f"  ➜ Los métodos producen agrupamientos DIFERENTES")
+    
+    # ============================================================
+    # RESUMEN FINAL
+    # ============================================================
+    print("\n" + "=" * 70)
+    print("RESUMEN DEL CLUSTERING")
+    print("=" * 70)
+    print(f"\nRESULTADOS PRINCIPALES:")
+    print(f"  • Método principal: K-Means")
+    print(f"  • Número óptimo de clusters (K): {k_optimo}")
+    print(f"  • Método de selección: {'KneeLocator' if KNEED_AVAILABLE else 'Manual (diferencias)'}")
+    print(f"  • Registros analizados: {len(df_cluster):,}")
+    print(f"  • Variables utilizadas: {df_encoded.shape[1]}")
+    print(f"  • Estandarización: StandardScaler (Z-score)")
+    
+    print(f"\nLOS CLUSTERS SE DIFERENCIAN POR:")
+    print(f"  ✓ Edad de las víctimas")
+    print(f"  ✓ Sexo predominante")
+    print(f"  ✓ Tipo de delito sufrido")
+    print(f"  ✓ Hora de ocurrencia del hecho")
+    
+    print(f"\nAPLICACIONES PRÁCTICAS:")
+    print(f"  • Identificar perfiles específicos de víctimas")
+    print(f"  • Diseñar estrategias de prevención focalizadas")
+    print(f"  • Asignar recursos policiales de manera eficiente")
+    print(f"  • Crear campañas de seguridad dirigidas")
+    print(f"  • Predecir patrones de victimización")
+    
+    print(f"\nARCHIVOS GENERADOS:")
+    print(f"  • outputs/graficos/clustering/metodo_codo_dendrograma.png")
+    print(f"  • outputs/graficos/clustering/caracterizacion.png")
+    print(f"  • outputs/graficos/clustering/clustermap.png")
+    
+    return df_cluster
 
 # ============================================================
 # MAIN - FLUJO COMPLETO DEL EDA
@@ -850,6 +1060,11 @@ def main():
     print("ANÁLISIS EXPLORATORIO DE DATOS (EDA)")
     print("Víctimas de Delitos en Guatemala - PNC/INE")
     print("=" * 70)
+    
+    # Crear estructura de carpetas para outputs
+    print("\nCreando estructura de carpetas...")
+    crear_estructura_carpetas()
+    print()
     
     # Cargar datos
     df = cargar_dataset("dataset_victimas.csv")
@@ -885,22 +1100,30 @@ def main():
     realizar_clustering(df_clean)
     
     # Guardar dataset limpio
-    df_clean.to_csv("dataset_victimas_limpio.csv", index=False)
+    df_clean.to_csv("outputs/datos/dataset_victimas_limpio.csv", index=False)
     print("\n" + "=" * 70)
     print("ANÁLISIS COMPLETO FINALIZADO")
     print("=" * 70)
-    print("✓ Dataset limpio guardado: dataset_victimas_limpio.csv")
-    print("✓ Todos los gráficos guardados como archivos PNG")
-    print("\nArchivos generados:")
-    print("  - analisis_normalidad.png")
-    print("  - pregunta1_patrones_temporales.png")
-    print("  - pregunta2_delitos_sexo.png")
-    print("  - pregunta3_concentracion_geografica.png")
-    print("  - pregunta4_estacionalidad_mensual.png")
-    print("  - pregunta5_delitos_sexuales.png")
-    print("  - graficos_exploratorios.png")
-    print("  - clustering_dendrograma.png")
-    print("  - clustering_caracterizacion.png")
+    print("✓ Dataset limpio guardado: outputs/datos/dataset_victimas_limpio.csv")
+    print("✓ Todos los gráficos guardados organizados en carpetas")
+    print("\nESTRUCTURA DE ARCHIVOS GENERADOS:")
+    print("\noutputs/")
+    print("├── datos/")
+    print("│   └── dataset_victimas_limpio.csv")
+    print("├── graficos/")
+    print("│   ├── analisis/")
+    print("│   │   ├── normalidad.png")
+    print("│   │   └── exploratorios.png")
+    print("│   ├── preguntas/")
+    print("│   │   ├── pregunta1_patrones_temporales.png")
+    print("│   │   ├── pregunta2_delitos_sexo.png")
+    print("│   │   ├── pregunta3_concentracion_geografica.png")
+    print("│   │   ├── pregunta4_estacionalidad_mensual.png")
+    print("│   │   └── pregunta5_delitos_sexuales.png")
+    print("│   └── clustering/")
+    print("│       ├── metodo_codo_dendrograma.png")
+    print("│       ├── caracterizacion.png")
+    print("│       └── clustermap.png")
     print("\n" + "=" * 70)
 
 def pregunta_2_delitos_sexo(df):
@@ -944,8 +1167,8 @@ def pregunta_2_delitos_sexo(df):
     axes[1].grid(axis='x', alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig('pregunta2_delitos_sexo.png', dpi=300, bbox_inches='tight')
-    print("\n✓ Gráfico guardado: pregunta2_delitos_sexo.png")
+    plt.savefig('outputs/graficos/preguntas/pregunta2_delitos_sexo.png', dpi=300, bbox_inches='tight')
+    print("\n✓ Gráfico guardado: outputs/graficos/preguntas/pregunta2_delitos_sexo.png")
     plt.show()
     
     # Conclusión
@@ -1017,8 +1240,8 @@ def pregunta_3_concentracion_geografica(df):
     axes[1, 1].set_ylabel('Departamento')
     
     plt.tight_layout()
-    plt.savefig('pregunta3_concentracion_geografica.png', dpi=300, bbox_inches='tight')
-    print("\n✓ Gráfico guardado: pregunta3_concentracion_geografica.png")
+    plt.savefig('outputs/graficos/preguntas/pregunta3_concentracion_geografica.png', dpi=300, bbox_inches='tight')
+    print("\n✓ Gráfico guardado: outputs/graficos/preguntas/pregunta3_concentracion_geografica.png")
     plt.show()
     
     # Conclusión
@@ -1095,8 +1318,8 @@ def pregunta_4_estacionalidad_mensual(df):
     axes[1, 1].set_ylabel('Mes')
     
     plt.tight_layout()
-    plt.savefig('pregunta4_estacionalidad_mensual.png', dpi=300, bbox_inches='tight')
-    print("\n✓ Gráfico guardado: pregunta4_estacionalidad_mensual.png")
+    plt.savefig('outputs/graficos/preguntas/pregunta4_estacionalidad_mensual.png', dpi=300, bbox_inches='tight')
+    print("\n✓ Gráfico guardado: outputs/graficos/preguntas/pregunta4_estacionalidad_mensual.png")
     plt.show()
     
     # Conclusión
@@ -1244,8 +1467,8 @@ def pregunta_5_delitos_sexuales(df):
                     family='monospace', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
     
     plt.tight_layout()
-    plt.savefig('pregunta5_delitos_sexuales.png', dpi=300, bbox_inches='tight')
-    print("\n✓ Gráfico guardado: pregunta5_delitos_sexuales.png")
+    plt.savefig('outputs/graficos/preguntas/pregunta5_delitos_sexuales.png', dpi=300, bbox_inches='tight')
+    print("\n✓ Gráfico guardado: outputs/graficos/preguntas/pregunta5_delitos_sexuales.png")
     plt.show()
     
     # Conclusiones
