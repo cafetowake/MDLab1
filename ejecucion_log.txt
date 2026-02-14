@@ -1,0 +1,20 @@
+======================================================================
+AN┴LISIS EXPLORATORIO DE DATOS (EDA)
+Vφctimas de Delitos en Guatemala - PNC/INE
+======================================================================
+
+Creando estructura de carpetas...
+Traceback (most recent call last):
+  File "C:\Users\paula\OneDrive\Documents\GitHub\MDLab1\analisis_exploratorio.py", line 1496, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\paula\OneDrive\Documents\GitHub\MDLab1\analisis_exploratorio.py", line 1066, in main
+    crear_estructura_carpetas()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\paula\OneDrive\Documents\GitHub\MDLab1\analisis_exploratorio.py", line 63, in crear_estructura_carpetas
+    print("\u2713 Estructura de carpetas creada:")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\paula\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2713' in position 0: character maps to <undefined>

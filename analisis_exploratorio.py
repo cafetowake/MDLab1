@@ -1,3 +1,5 @@
+﻿# -*- coding: utf-8 -*-
+# vim: set fileencoding=utf-8 :
 """
 Universidad del Valle de Guatemala
 Departamento de Computación
@@ -20,6 +22,8 @@ Este script realiza:
 8. Clustering con interpretación
 """
 
+import sys
+import io
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -34,6 +38,13 @@ from kneed import KneeLocator
 import warnings
 import os
 from pathlib import Path
+
+# ============================================================
+# CONFIGURACIÓN DE ENCODING PARA UTF-8 (Windows compatibility)
+# ============================================================
+if sys.platform == 'win32':
+    # Configure stdout para UTF-8 en Windows
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 warnings.filterwarnings('ignore')
 
